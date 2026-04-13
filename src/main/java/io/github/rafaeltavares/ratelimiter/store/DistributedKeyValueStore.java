@@ -1,4 +1,4 @@
-package io.github.rafaeltavares.ratelimiter;
+package io.github.rafaeltavares.ratelimiter.store;
 
 import java.util.concurrent.CompletableFuture;
 
