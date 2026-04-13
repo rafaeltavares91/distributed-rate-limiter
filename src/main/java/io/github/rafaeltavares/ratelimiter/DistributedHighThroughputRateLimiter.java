@@ -21,7 +21,7 @@ public class DistributedHighThroughputRateLimiter {
     private final ShardStrategy shardStrategy;
     private final ConcurrentHashMap<String, LocalCounterState> counters = new ConcurrentHashMap<>();
 
-    public DistributedHighThroughputRateLimiter(
+    private DistributedHighThroughputRateLimiter(
             DistributedKeyValueStore keyValueStore,
             RateLimiterConfig config,
             Clock clock
@@ -32,11 +32,12 @@ public class DistributedHighThroughputRateLimiter {
         this.shardStrategy = new ShardStrategy(config.getShardCount());
     }
 
-    public DistributedHighThroughputRateLimiter(
+    public static DistributedHighThroughputRateLimiter of(
             DistributedKeyValueStore keyValueStore,
-            RateLimiterConfig config
+            RateLimiterConfig config,
+            Clock clock
     ) {
-        this(keyValueStore, config, Clock.systemUTC());
+        return new DistributedHighThroughputRateLimiter(keyValueStore, config, clock);
     }
 
     public CompletableFuture<Boolean> isAllowed(String key, int limit) {
@@ -50,16 +51,44 @@ public class DistributedHighThroughputRateLimiter {
             return CompletableFuture.completedFuture(false);
         }
 
+        long nowMillis = clock.millis();
+
         LocalCounterState state = counters.computeIfAbsent(
                 key,
-                ignored -> LocalCounterState.of(clock.millis())
+                ignored -> new LocalCounterState(nowMillis)
         );
 
+        refreshWindowIfNeeded(state, nowMillis);
+
+        long localCount = state.incrementLocalWindowCount();
         state.incrementPendingDelta();
 
         maybeFlush(key, state);
 
-        return CompletableFuture.completedFuture(true);
+        long effectiveLocalLimit = computeEffectiveLocalLimit(limit);
+
+        return CompletableFuture.completedFuture(localCount <= effectiveLocalLimit);
+    }
+
+    private void refreshWindowIfNeeded(LocalCounterState state, long nowMillis) {
+        long windowDurationMillis = config.getWindowSeconds() * 1000L;
+
+        while (true) {
+            long currentWindowStart = state.windowStartMillis();
+
+            if (nowMillis - currentWindowStart < windowDurationMillis) {
+                return;
+            }
+
+            if (state.tryAdvanceWindow(currentWindowStart, nowMillis)) {
+                state.resetLocalWindowCount();
+                return;
+            }
+        }
+    }
+
+    private long computeEffectiveLocalLimit(int limit) {
+        return (long) limit + config.getBatchSize();
     }
 
     private void maybeFlush(String key, LocalCounterState state) {

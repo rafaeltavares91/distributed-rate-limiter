@@ -12,12 +12,12 @@ public final class LocalCounterState {
     private final AtomicInteger nextShardIndex = new AtomicInteger(0);
     private final AtomicBoolean flushInProgress = new AtomicBoolean(false);
 
-    private LocalCounterState(long initialFlushMillis) {
-        this.lastFlushMillis = new AtomicLong(initialFlushMillis);
-    }
+    private final AtomicLong localWindowCount = new AtomicLong(0L);
+    private final AtomicLong windowStartMillis;
 
-    public static LocalCounterState of(long initialFlushMillis) {
-        return new LocalCounterState(initialFlushMillis);
+    public LocalCounterState(long initialTimestampMillis) {
+        this.lastFlushMillis = new AtomicLong(initialTimestampMillis);
+        this.windowStartMillis = new AtomicLong(initialTimestampMillis);
     }
 
     public void incrementPendingDelta() {
@@ -56,4 +56,23 @@ public final class LocalCounterState {
         return flushInProgress.get();
     }
 
+    public long windowStartMillis() {
+        return windowStartMillis.get();
+    }
+
+    public boolean tryAdvanceWindow(long expectedWindowStartMillis, long newWindowStartMillis) {
+        return windowStartMillis.compareAndSet(expectedWindowStartMillis, newWindowStartMillis);
+    }
+
+    public void resetLocalWindowCount() {
+        localWindowCount.set(0L);
+    }
+
+    public long incrementLocalWindowCount() {
+        return localWindowCount.incrementAndGet();
+    }
+
+    public long localWindowCount() {
+        return localWindowCount.get();
+    }
 }
