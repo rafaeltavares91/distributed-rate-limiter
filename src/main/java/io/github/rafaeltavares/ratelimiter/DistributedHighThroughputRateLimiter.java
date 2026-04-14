@@ -60,8 +60,8 @@ public class DistributedHighThroughputRateLimiter {
 
         refreshWindowIfNeeded(state, nowMillis);
 
-        long localCount = state.incrementLocalWindowCount();
-        state.incrementPendingDelta();
+        long localCount = state.incrementRequestsInCurrentWindow();
+        state.incrementPendingBatchCount();
 
         maybeFlush(key, state);
 
@@ -74,14 +74,14 @@ public class DistributedHighThroughputRateLimiter {
         long windowDurationMillis = config.getWindowSeconds() * 1000L;
 
         while (true) {
-            long currentWindowStart = state.windowStartMillis();
+            long currentWindowStartedAt = state.getCurrentWindowStartedAtMillis();
 
-            if (nowMillis - currentWindowStart < windowDurationMillis) {
+            if (nowMillis - currentWindowStartedAt < windowDurationMillis) {
                 return;
             }
 
-            if (state.tryAdvanceWindow(currentWindowStart, nowMillis)) {
-                state.resetLocalWindowCount();
+            if (state.tryMoveToNextWindow(currentWindowStartedAt, nowMillis)) {
+                state.resetRequestsInCurrentWindow();
                 return;
             }
         }
@@ -92,18 +92,7 @@ public class DistributedHighThroughputRateLimiter {
     }
 
     private void maybeFlush(String key, LocalCounterState state) {
-        long nowMillis = clock.millis();
-        long pendingDelta = state.pendingDelta();
-
-        if (pendingDelta <= 0) {
-            return;
-        }
-
-        boolean batchThresholdReached = pendingDelta >= config.getBatchSize();
-        boolean flushIntervalReached =
-                nowMillis - state.lastFlushMillis() >= config.getFlushInterval().toMillis();
-
-        if (!batchThresholdReached && !flushIntervalReached) {
+        if (!shouldFlush(state)) {
             return;
         }
 
@@ -111,44 +100,65 @@ public class DistributedHighThroughputRateLimiter {
             return;
         }
 
-        long deltaToFlush = state.drainPendingDelta();
+        flushPendingBatch(key, state);
+    }
 
-        if (deltaToFlush <= 0) {
+    private boolean shouldFlush(LocalCounterState state) {
+        long nowMillis = clock.millis();
+        long pendingBatchCount = state.getPendingBatchCount();
+
+        if (pendingBatchCount <= 0) {
+            return false;
+        }
+
+        boolean batchSizeReached = pendingBatchCount >= config.getBatchSize();
+        boolean flushIntervalReached =
+                nowMillis - state.getLastFlushAtMillis() >= config.getFlushInterval().toMillis();
+
+        return batchSizeReached || flushIntervalReached;
+    }
+
+    private void flushPendingBatch(String key, LocalCounterState state) {
+        long batchToFlush = state.drainPendingBatchCount();
+
+        if (batchToFlush <= 0) {
             state.finishFlush();
             return;
         }
 
-        if (deltaToFlush > Integer.MAX_VALUE) {
+        if (batchToFlush > Integer.MAX_VALUE) {
             state.finishFlush();
-            throw new IllegalStateException("deltaToFlush exceeds integer range");
+            throw new IllegalStateException("batchToFlush exceeds integer range");
         }
 
-        int shardSequence = state.nextShardSequence();
-        String shardKey = shardStrategy.nextShardKey(key, shardSequence);
+        String shardKey = nextShardKey(key, state);
 
-        final CompletableFuture<Integer> flushFuture;
         try {
-            flushFuture = keyValueStore.incrementByAndExpire(
+            keyValueStore.incrementByAndExpire(
                     shardKey,
-                    (int) deltaToFlush,
+                    (int) batchToFlush,
                     config.getWindowSeconds()
-            );
+            ).whenComplete((ignored, throwable) -> handleFlushCompletion(key, state, throwable));
         } catch (Exception exception) {
             state.finishFlush();
-            return;
+        }
+    }
+
+    private String nextShardKey(String key, LocalCounterState state) {
+        int shardCounter = state.nextShardCounter();
+        return shardStrategy.nextShardKey(key, shardCounter);
+    }
+
+    private void handleFlushCompletion(String key, LocalCounterState state, Throwable throwable) {
+        if (throwable == null) {
+            state.markFlushAt(clock.millis());
         }
 
-        flushFuture.whenComplete((ignored, throwable) -> {
-            if (throwable == null) {
-                state.updateLastFlushMillis(clock.millis());
-            }
+        state.finishFlush();
 
-            state.finishFlush();
-
-            if (state.pendingDelta() > 0) {
-                maybeFlush(key, state);
-            }
-        });
+        if (state.getPendingBatchCount() > 0) {
+            maybeFlush(key, state);
+        }
     }
 
 }

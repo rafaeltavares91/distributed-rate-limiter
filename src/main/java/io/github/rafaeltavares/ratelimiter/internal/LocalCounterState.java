@@ -7,72 +7,64 @@ import java.util.concurrent.atomic.LongAdder;
 
 public final class LocalCounterState {
 
-    private final LongAdder pendingDelta = new LongAdder();
-    private final AtomicLong lastFlushMillis;
-    private final AtomicInteger nextShardIndex = new AtomicInteger(0);
-    private final AtomicBoolean flushInProgress = new AtomicBoolean(false);
+    private final LongAdder pendingBatchCount = new LongAdder();
+    private final AtomicLong lastFlushAtMillis;
+    private final AtomicInteger nextShardCounter = new AtomicInteger(0);
+    private final AtomicBoolean flushRunning = new AtomicBoolean(false);
 
-    private final AtomicLong localWindowCount = new AtomicLong(0L);
-    private final AtomicLong windowStartMillis;
+    private final AtomicLong requestsInCurrentWindow = new AtomicLong(0L);
+    private final AtomicLong currentWindowStartedAtMillis;
 
     public LocalCounterState(long initialTimestampMillis) {
-        this.lastFlushMillis = new AtomicLong(initialTimestampMillis);
-        this.windowStartMillis = new AtomicLong(initialTimestampMillis);
+        this.lastFlushAtMillis = new AtomicLong(initialTimestampMillis);
+        this.currentWindowStartedAtMillis = new AtomicLong(initialTimestampMillis);
     }
 
-    public void incrementPendingDelta() {
-        pendingDelta.increment();
+    public void incrementPendingBatchCount() {
+        pendingBatchCount.increment();
     }
 
-    public long pendingDelta() {
-        return pendingDelta.sum();
+    public long getPendingBatchCount() {
+        return pendingBatchCount.sum();
     }
 
-    public long drainPendingDelta() {
-        return pendingDelta.sumThenReset();
+    public long drainPendingBatchCount() {
+        return pendingBatchCount.sumThenReset();
     }
 
-    public long lastFlushMillis() {
-        return lastFlushMillis.get();
+    public long getLastFlushAtMillis() {
+        return lastFlushAtMillis.get();
     }
 
-    public void updateLastFlushMillis(long timestampMillis) {
-        lastFlushMillis.set(timestampMillis);
+    public void markFlushAt(long timestampMillis) {
+        lastFlushAtMillis.set(timestampMillis);
     }
 
-    public int nextShardSequence() {
-        return nextShardIndex.getAndIncrement();
+    public int nextShardCounter() {
+        return nextShardCounter.getAndIncrement();
     }
 
     public boolean tryStartFlush() {
-        return flushInProgress.compareAndSet(false, true);
+        return flushRunning.compareAndSet(false, true);
     }
 
     public void finishFlush() {
-        flushInProgress.set(false);
+        flushRunning.set(false);
     }
 
-    public boolean isFlushInProgress() {
-        return flushInProgress.get();
+    public long getCurrentWindowStartedAtMillis() {
+        return currentWindowStartedAtMillis.get();
     }
 
-    public long windowStartMillis() {
-        return windowStartMillis.get();
+    public boolean tryMoveToNextWindow(long expectedStartMillis, long newStartMillis) {
+        return currentWindowStartedAtMillis.compareAndSet(expectedStartMillis, newStartMillis);
     }
 
-    public boolean tryAdvanceWindow(long expectedWindowStartMillis, long newWindowStartMillis) {
-        return windowStartMillis.compareAndSet(expectedWindowStartMillis, newWindowStartMillis);
+    public void resetRequestsInCurrentWindow() {
+        requestsInCurrentWindow.set(0L);
     }
 
-    public void resetLocalWindowCount() {
-        localWindowCount.set(0L);
-    }
-
-    public long incrementLocalWindowCount() {
-        return localWindowCount.incrementAndGet();
-    }
-
-    public long localWindowCount() {
-        return localWindowCount.get();
+    public long incrementRequestsInCurrentWindow() {
+        return requestsInCurrentWindow.incrementAndGet();
     }
 }
