@@ -67,4 +67,5 @@ public final class LocalCounterState {
     public long incrementRequestsInCurrentWindow() {
         return requestsInCurrentWindow.incrementAndGet();
     }
+
 }

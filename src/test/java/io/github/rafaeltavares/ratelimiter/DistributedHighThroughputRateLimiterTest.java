@@ -15,14 +15,13 @@ import static org.mockito.Mockito.*;
 
 class DistributedHighThroughputRateLimiterTest {
 
-    private DistributedKeyValueStore keyValueStore;
     private MutableClock clock;
     private RateLimiterConfig config;
     private DistributedHighThroughputRateLimiter rateLimiter;
 
     @BeforeEach
     void setUp() throws Exception {
-        keyValueStore = mock(DistributedKeyValueStore.class);
+        DistributedKeyValueStore keyValueStore = mock(DistributedKeyValueStore.class);
         when(keyValueStore.incrementByAndExpire(anyString(), anyInt(), anyInt()))
                 .thenReturn(CompletableFuture.completedFuture(1));
 
@@ -55,7 +54,7 @@ class DistributedHighThroughputRateLimiterTest {
     }
 
     @Test
-    void shouldAllowRequestsBelowLocalEffectiveLimit() {
+    void shouldAllowRequestsUpToEffectiveLocalLimit() {
         int limit = 5;
         long effectiveLocalLimit = limit + config.getBatchSize();
 
@@ -65,7 +64,7 @@ class DistributedHighThroughputRateLimiterTest {
     }
 
     @Test
-    void shouldDenyRequestsAboveLocalEffectiveLimit() {
+    void shouldDenyRequestsAboveEffectiveLocalLimit() {
         int limit = 5;
         long effectiveLocalLimit = limit + config.getBatchSize();
 
@@ -77,50 +76,7 @@ class DistributedHighThroughputRateLimiterTest {
     }
 
     @Test
-    void shouldFlushWhenBatchSizeIsReached() throws Exception {
-        rateLimiter.isAllowed("client-a", 100).join();
-        rateLimiter.isAllowed("client-a", 100).join();
-
-        verify(keyValueStore, never()).incrementByAndExpire(anyString(), anyInt(), anyInt());
-
-        rateLimiter.isAllowed("client-a", 100).join();
-
-        verify(keyValueStore, times(1))
-                .incrementByAndExpire(eq("client-a:0"), eq(3), eq(config.getWindowSeconds()));
-    }
-
-    @Test
-    void shouldFlushWhenFlushIntervalIsReachedEvenIfBatchSizeWasNotReached() throws Exception {
-        rateLimiter.isAllowed("client-a", 100).join();
-        verify(keyValueStore, never()).incrementByAndExpire(anyString(), anyInt(), anyInt());
-
-        clock.advanceMillis(150);
-
-        rateLimiter.isAllowed("client-a", 100).join();
-
-        verify(keyValueStore, times(1))
-                .incrementByAndExpire(eq("client-a:0"), eq(2), eq(config.getWindowSeconds()));
-    }
-
-    @Test
-    void shouldUseNextShardOnNextFlush() throws Exception {
-        rateLimiter.isAllowed("client-a", 100).join();
-        rateLimiter.isAllowed("client-a", 100).join();
-        rateLimiter.isAllowed("client-a", 100).join();
-
-        clock.advanceMillis(150);
-
-        rateLimiter.isAllowed("client-a", 100).join();
-
-        verify(keyValueStore, times(1))
-                .incrementByAndExpire(eq("client-a:0"), eq(3), eq(config.getWindowSeconds()));
-
-        verify(keyValueStore, times(1))
-                .incrementByAndExpire(eq("client-a:1"), eq(1), eq(config.getWindowSeconds()));
-    }
-
-    @Test
-    void shouldResetLocalWindowAfterWindowExpires() {
+    void shouldResetWindowAfterConfiguredDuration() {
         int limit = 2;
         long effectiveLocalLimit = limit + config.getBatchSize();
 

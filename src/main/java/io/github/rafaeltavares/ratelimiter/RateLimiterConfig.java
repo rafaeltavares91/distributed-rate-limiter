@@ -1,19 +1,22 @@
 package io.github.rafaeltavares.ratelimiter;
 
+import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
 import lombok.Getter;
 
 import java.time.Duration;
 import java.util.Objects;
 
 @Getter
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RateLimiterConfig {
 
     private final int batchSize;
     private final Duration flushInterval;
-    private final int shardCount; // number of subkeys
-    private final int windowSeconds; // rate limit duration window
+    private final int shardCount;
+    private final int windowSeconds;
 
-    private RateLimiterConfig(
+    public static RateLimiterConfig of(
             int batchSize,
             Duration flushInterval,
             int shardCount,
@@ -28,25 +31,21 @@ public final class RateLimiterConfig {
         if (flushInterval.isZero() || flushInterval.isNegative()) {
             throw new IllegalArgumentException("flushInterval must be greater than zero");
         }
+
         if (shardCount <= 0) {
             throw new IllegalArgumentException("shardCount must be greater than zero");
         }
+
         if (windowSeconds <= 0) {
             throw new IllegalArgumentException("windowSeconds must be greater than zero");
         }
-        this.batchSize = batchSize;
-        this.flushInterval = flushInterval;
-        this.shardCount = shardCount;
-        this.windowSeconds = windowSeconds;
-    }
 
-    public static RateLimiterConfig of(
-            int batchSize,
-            Duration flushInterval,
-            int shardCount,
-            int windowSeconds
-    ) {
-        return new RateLimiterConfig(batchSize, flushInterval, shardCount, windowSeconds);
+        return new RateLimiterConfig(
+                batchSize,
+                flushInterval,
+                shardCount,
+                windowSeconds
+        );
     }
 
     public static RateLimiterConfig defaultConfig() {
