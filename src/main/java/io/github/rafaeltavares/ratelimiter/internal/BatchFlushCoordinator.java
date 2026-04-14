@@ -71,11 +71,6 @@ public final class BatchFlushCoordinator {
             return;
         }
 
-        if (batchToFlush > Integer.MAX_VALUE) {
-            state.finishFlush();
-            throw new IllegalStateException("batchToFlush exceeds integer range");
-        }
-
         String shardKey = nextShardKey(key, state);
 
         try {
