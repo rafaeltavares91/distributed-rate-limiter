@@ -2,7 +2,7 @@ package io.github.rafaeltavares.ratelimiter.internal;
 
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.*;
 
 class LocalCounterStateTest {
 
@@ -55,6 +55,40 @@ class LocalCounterStateTest {
 
         assertEquals(3L, drained);
         assertEquals(0L, state.getPendingBatchCount());
+    }
+
+    @Test
+    void shouldReportWhenThereIsPendingBatch() {
+        LocalCounterState state = new LocalCounterState(1_000L);
+
+        assertFalse(state.hasPendingBatch());
+
+        state.incrementPendingBatchCount();
+
+        assertTrue(state.hasPendingBatch());
+    }
+
+    @Test
+    void shouldReportWhenBatchSizeWasReached() {
+        LocalCounterState state = new LocalCounterState(1_000L);
+
+        state.incrementPendingBatchCount();
+        state.incrementPendingBatchCount();
+
+        assertFalse(state.reachedBatchSize(3));
+
+        state.incrementPendingBatchCount();
+
+        assertTrue(state.reachedBatchSize(3));
+    }
+
+    @Test
+    void shouldReportWhenFlushIntervalWasExceeded() {
+        LocalCounterState state = new LocalCounterState(1_000L);
+
+        assertFalse(state.flushIntervalExceeded(1_050L, 100L));
+        assertTrue(state.flushIntervalExceeded(1_100L, 100L));
+        assertTrue(state.flushIntervalExceeded(1_150L, 100L));
     }
 
     @Test

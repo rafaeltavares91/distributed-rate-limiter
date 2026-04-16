@@ -11,8 +11,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * High-throughput distributed rate limiter that uses local estimation for allow/deny decisions
- * and asynchronously flushes aggregated counters to a distributed key-value store.
+ * High-throughput distributed rate limiter that uses local estimation to make
+ * fast allow/deny decisions and asynchronously flushes aggregated counts to a
+ * distributed store.
+ *
+ * <p>This implementation avoids calling the distributed store on every request,
+ * favoring batching and eventual consistency to achieve high performance under load.</p>
  */
 @Getter
 public final class DistributedHighThroughputRateLimiter {
@@ -60,6 +64,23 @@ public final class DistributedHighThroughputRateLimiter {
         return of(keyValueStore, config, Clock.systemUTC());
     }
 
+    /**
+     * Determines whether a request for the given key should be allowed.
+     *
+     * <p>This method:
+     * <ul>
+     *   <li>increments a local request counter within a time window</li>
+     *   <li>buffers the request for later batch flushing</li>
+     *   <li>uses a local approximation to decide if the request is allowed</li>
+     * </ul>
+     *
+     * <p>The decision is based on a relaxed limit (limit + batchSize), allowing
+     * small temporary overshoots in favor of higher throughput.</p>
+     *
+     * @param key the rate limit key (e.g., client ID)
+     * @param limit the configured request limit for the key
+     * @return a future containing {@code true} if the request is allowed, {@code false} otherwise
+     */
     public CompletableFuture<Boolean> isAllowed(String key, int limit) {
         Objects.requireNonNull(key, "key must not be null");
 
@@ -73,15 +94,9 @@ public final class DistributedHighThroughputRateLimiter {
 
         long nowMillis = clock.millis();
 
-        LocalCounterState state = counters.computeIfAbsent(
-                key,
-                ignored -> new LocalCounterState(nowMillis)
-        );
+        LocalCounterState state = counters.computeIfAbsent(key, ignored -> new LocalCounterState(nowMillis));
 
-        long requestsInCurrentWindow = state.incrementRequestsInWindow(
-                nowMillis,
-                windowDurationMillis()
-        );
+        long requestsInCurrentWindow = state.incrementRequestsInWindow(nowMillis, windowDurationMillis());
 
         state.incrementPendingBatchCount();
         batchFlushCoordinator.maybeFlush(key, state);
