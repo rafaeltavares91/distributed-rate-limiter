@@ -110,7 +110,7 @@ public final class BatchFlushCoordinator {
             throw new IllegalStateException("batchToFlush exceeds integer range");
         }
 
-        String shardKey = nextShardKey(key, state);
+        String shardKey = shardStrategy.nextShardKey(key, state.nextShardCounter());
 
         try {
             CompletableFuture<Integer> flushFuture = keyValueStore.incrementByAndExpire(
@@ -125,13 +125,6 @@ public final class BatchFlushCoordinator {
         } catch (Exception exception) {
             state.finishFlush();
         }
-    }
-
-    /**
-     * Builds the next shard key for the given logical key.
-     */
-    private String nextShardKey(String key, LocalCounterState state) {
-        return shardStrategy.nextShardKey(key, state.nextShardCounter());
     }
 
     /**
