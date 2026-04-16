@@ -15,13 +15,14 @@ import static org.mockito.Mockito.*;
 
 class DistributedHighThroughputRateLimiterTest {
 
+    private DistributedKeyValueStore keyValueStore;
     private MutableClock clock;
     private RateLimiterConfig config;
     private DistributedHighThroughputRateLimiter rateLimiter;
 
     @BeforeEach
     void setUp() throws Exception {
-        DistributedKeyValueStore keyValueStore = mock(DistributedKeyValueStore.class);
+        keyValueStore = mock(DistributedKeyValueStore.class);
         when(keyValueStore.incrementByAndExpire(anyString(), anyInt(), anyInt()))
                 .thenReturn(CompletableFuture.completedFuture(1));
 

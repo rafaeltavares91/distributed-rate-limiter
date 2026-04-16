@@ -5,6 +5,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 
+/**
+ * Holds the local per-key state used by the rate limiter.
+ *
+ * <p>This includes:
+ * - the number of requests seen in the current local time window
+ * - the number of locally buffered requests pending flush
+ * - flush coordination state
+ * - shard sequencing for distributed writes</p>
+ */
 public final class LocalCounterState {
 
     private final LongAdder pendingBatchCount = new LongAdder();
@@ -52,20 +61,38 @@ public final class LocalCounterState {
         flushRunning.set(false);
     }
 
-    public long getCurrentWindowStartedAtMillis() {
-        return currentWindowStartedAtMillis.get();
-    }
-
-    public boolean tryMoveToNextWindow(long expectedStartMillis, long newStartMillis) {
-        return currentWindowStartedAtMillis.compareAndSet(expectedStartMillis, newStartMillis);
-    }
-
-    public void resetRequestsInCurrentWindow() {
-        requestsInCurrentWindow.set(0L);
-    }
-
-    public long incrementRequestsInCurrentWindow() {
+    /**
+     * Advances the local time window when it has expired and returns the updated
+     * request count for the current window.
+     *
+     * <p>This method is thread-safe and uses CAS to ensure that only one thread
+     * performs the window transition.</p>
+     *
+     * @param nowMillis current timestamp in milliseconds
+     * @param windowDurationMillis configured window duration in milliseconds
+     * @return the incremented request count for the active local window
+     */
+    public long incrementRequestsInWindow(long nowMillis, long windowDurationMillis) {
+        moveToNextWindowIfNeeded(nowMillis, windowDurationMillis);
         return requestsInCurrentWindow.incrementAndGet();
+    }
+
+    private void moveToNextWindowIfNeeded(long nowMillis, long windowDurationMillis) {
+        while (isWindowExpired(nowMillis, windowDurationMillis)) {
+            long currentWindowStartedAt = currentWindowStartedAtMillis.get();
+
+            if (currentWindowStartedAtMillis.compareAndSet(currentWindowStartedAt, nowMillis)) {
+                requestsInCurrentWindow.set(0L);
+                return;
+            }
+
+            // Another thread may advance the window first, so retry until the state is up-to-date.
+        }
+    }
+
+    private boolean isWindowExpired(long nowMillis, long windowDurationMillis) {
+        long windowStart = currentWindowStartedAtMillis.get();
+        return nowMillis - windowStart >= windowDurationMillis;
     }
 
 }
